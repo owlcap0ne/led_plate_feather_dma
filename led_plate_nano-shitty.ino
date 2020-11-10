@@ -4,7 +4,7 @@
 #define MASK_R 0x1  //red
 #define MASK_G 0x2  //green
 #define MASK_B 0x4  //blue
-#define MASK_A 0x5  //all
+#define MASK_A 0x8  //all
 
 typedef struct {
   union {
@@ -201,7 +201,7 @@ void parseData() {
 void setup() {
     Serial.begin(9600);
     SPI.begin();
-    t_R, t_G, t_B = millis();
+    t_R, t_G, t_B, t_I = millis();
 }
 
 void loop() {
