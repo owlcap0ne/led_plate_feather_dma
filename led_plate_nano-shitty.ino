@@ -1,4 +1,3 @@
-// SPI for avr - Version: Latest 
 #include <SPI.h>
 #include <EEPROM.h>
 
@@ -28,7 +27,10 @@ typedef struct {
 } LED;
 
 typedef struct {
-  uint8_t   brightness;
+  uint8_t   brightness,
+            red,
+            green,
+            blue;
   uint16_t  tOn_R,
             tOff_R,
             tOn_G,
@@ -42,8 +44,12 @@ typedef struct {
 //LED led = {0x0A, 0x0A, 0x00};
 #define N_LEDS 24
 LED led[N_LEDS];
+
 CONFIG config = {
   .brightness = 31,
+  .red     = 0,
+  .green   = 0,
+  .blue    = 0,
   .tOn_R   = 1,
   .tOff_R  = 0,
   .tOn_G   = 0,
@@ -59,20 +65,9 @@ char receivedChars[numChars];
 char tmpChars[numChars];
 boolean newData = false;
 
-/* 
-uint8_t brightness = 31;
-uint16_t tOn_R = 1;
-uint16_t tOff_R = 0;
-uint16_t tOn_G = 10;
-uint16_t tOff_G = 190;
-uint16_t tOn_B = 0;
-uint16_t tOff_B = 0;
-uint16_t tOn_I = 1;
-uint16_t tOff_I = 0;
-*/
 unsigned long t, t_R, t_G, t_B, t_I;
 
-uint8_t red, green, blue;
+//uint8_t red, green, blue;
 
 void APA102(LED *ledarray, uint8_t leds, uint8_t brightness, uint8_t mask) {
   uint8_t *_ledarray = (uint8_t*) ledarray;
@@ -153,24 +148,24 @@ void parseData() {
     Serial.println("Got colorful data!");
     strtokIndx = strtok(NULL, ",:;");
     Serial.println(strtokIndx);
-    red = (uint8_t) atoi(strtokIndx);
+    config.red = (uint8_t) atoi(strtokIndx);
     for(int i = 0; i < N_LEDS; i++)
     {
-      led[i].red = red;
+      led[i].red = config.red;
     }
     strtokIndx = strtok(NULL, ",:;");
     Serial.println(strtokIndx);
-    green = (uint8_t) atoi(strtokIndx);
+    config.green = (uint8_t) atoi(strtokIndx);
     for(int i = 0; i < N_LEDS; i++)
     {
-      led[i].green = green;
+      led[i].green = config.green;
     }
     strtokIndx = strtok(NULL, ",:;");
     Serial.println(strtokIndx);
-    blue = (uint8_t) atoi(strtokIndx);
+    config.blue = (uint8_t) atoi(strtokIndx);
     for(int i = 0; i < N_LEDS; i++)
     {
-      led[i].blue = blue;
+      led[i].blue = config.blue;
     }
   }
   else if(strtokIndx[0] == 'i') {
