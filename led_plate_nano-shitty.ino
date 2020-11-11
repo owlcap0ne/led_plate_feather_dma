@@ -1,5 +1,6 @@
 // SPI for avr - Version: Latest 
 #include <SPI.h>
+#include <EEPROM.h>
 
 #define MASK_R 0x1  //red
 #define MASK_G 0x2  //green
@@ -220,8 +221,27 @@ void parseData() {
       config.tOff_R, config.tOff_G, config.tOff_B = (uint16_t) atoi(strtokIndx);
     }
   }
+  else if (strtokIndx[0] == 's')
+  {
+  Serial.println("Saved current configuration to EEPROM!");
+  EEPROM.put(0, config);
+  }
+  else if (strtokIndx[0] == 'l')
+  {
+  Serial.println("Loaded previous configuration from EEPROM!");
+  EEPROM.get(0, config);
+  }
   else if(strtokIndx[0] == 'h') {
-    Serial.print("Accepted Formats:\n\tbrightness: b:xx - 0 to 31\n\tcolor: c:xxx:xxx:xxx - 0 to 255\n\tduration: d:xx:xx - tOn, tOff in ms\n\tcolor duration dr, dg, db:xx:xx -tOn, tOff in ms\n\tinterval: i:xx:xx - tOn, tOff in sec\n\thelp: h\n");
+    Serial.print(R"(Accepted Formats:
+	brightness: b:xx - 0 to 31
+	color: c:xxx:xxx:xxx - 0 to 255
+	duration: d:xx:xx - tOn, tOff in ms
+	color duration dr, dg, db:xx:xx -tOn, tOff in ms
+	interval: i:xx:xx - tOn, tOff in sec
+	save config to EEPROM: s
+	load config from EEPROM: l
+	help: h
+)");
   }
   newData = false;
 }
