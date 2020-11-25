@@ -76,6 +76,7 @@ const byte numChars = 32;
 char receivedChars[numChars];
 char tmpChars[numChars];
 boolean newData = false;
+boolean loadOnBoot = true;
 
 LED_BUFFER frameBuffer[2];  // double buffering - write one while transmitting the other
 uint8_t buffer_free = 0;  // the one currently not in use by the DMA peripheral
@@ -302,6 +303,11 @@ void setup() {
     SPI.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE0));
     dmaStat = dma.startJob(); // go!
     while(!dmaDone);  // just wait
+
+    if(loadOnBoot)
+    {
+      config = flash.read();
+    }
 
     t_R, t_G, t_B, t_I = millis();
 }
