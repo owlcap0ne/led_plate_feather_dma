@@ -10,6 +10,13 @@
 
 #define N_LEDS 24
 
+#define C_MASK_0  (1 << 0)
+#define C_MASK_1  (1 << 1)
+#define C_MASK_2  (1 << 2)
+#define C_MASK_3  (1 << 3)
+#define C_MASK_4  (1 << 4)
+#define C_MASK_5  (1 << 5)
+
 #define SPI_SPEED 8000000
 
 typedef struct {
@@ -42,6 +49,20 @@ typedef struct {
   uint8_t end[N_LEDS / 16]; // end frame all 0's again
 } LED_BUFFER;
 
+// holds the last switching time and color mask for a config
+typedef struct {
+  union {
+    struct {
+      unsigned long t_R,
+                    t_G,
+                    t_B,
+                    t_I;
+    };
+    unsigned long t_X[4];
+  };
+  uint8_t mask;
+} CONFIG_STATE;
+
 typedef struct {
   uint8_t   brightness,
             red,
@@ -57,6 +78,46 @@ typedef struct {
             tOff_I;
 } CONFIG;
 
+void config_setDuration(uint16_t tOn, uint16_t tOff, enum color{red = 0, green, blue, all})
+{
+  for(int n = 0; n < 6; n++)
+  {
+    if(configMask & (1 << n)) // true if config n is settable
+    {
+      switch(color)
+      {
+        case red:
+          configs[n].tOn_R = tOn;
+          configs[n].tOff_R = tOff;
+        break;
+
+        case green:
+          configs[n].tOn_G = tOn;
+          configs[n].tOff_G = tOff;
+        break;
+
+        case blue:
+          configs[n].tOn_B = tOn;
+          configs[n].tOff_B = tOff;
+        break;
+
+        case all:
+          configs[n].tOn_R = tOn;
+          configs[n].tOff_R = tOff;
+          configs[n].tOn_G = tOn;
+          configs[n].tOff_G = tOff;
+          configs[n].tOn_B = tOn;
+          configs[n].tOff_B = tOff;
+        break;
+      }
+    }
+  }
+}
+
+CONFIG configs[6];
+CONFIG_STATE configsState[6];
+
+/*
 CONFIG config = {
   .brightness = 31,
   .red     = 0,
@@ -71,12 +132,16 @@ CONFIG config = {
   .tOn_I   = 1,
   .tOff_I  = 0
 };
+*/
 
 const byte numChars = 32;
 char receivedChars[numChars];
 char tmpChars[numChars];
 boolean newData = false;
 boolean loadOnBoot = true;
+
+// bitwise mask to select configs for setters
+int configMask = C_MASK_0 | C_MASK_1 | C_MASK_2 | C_MASK_3 | C_MASK_4 | C_MASK_5; // default: select all
 
 LED_BUFFER frameBuffer[2];  // double buffering - write one while transmitting the other
 uint8_t buffer_free = 0;  // the one currently not in use by the DMA peripheral
@@ -206,12 +271,12 @@ void parseData() {
   else if (strtokIndx[0] == 's')
   {
   Serial.println("Saved current configuration to EEPROM!");
-    flash.write(config);
+    flash.write(configs);
   }
   else if (strtokIndx[0] == 'l')
   {
   Serial.println("Loaded previous configuration from EEPROM!");
-    config = flash.read();
+    configs = flash.read();
   }
   else if(strtokIndx[0] == 'h') {
     Serial.print(R"(Accepted Formats:
@@ -276,6 +341,82 @@ void writeFrame(LED_BUFFER *buffer, CONFIG *config, uint8_t mask) {
   }
 }
 
+void writeCol(LED_BUFFER *buffer, CONFIG *config, uint8_t config_index)
+{
+  // clamping to avoid memory corruption
+  if(config_index > 5)
+    config_index = 5;
+  
+  uint8_t red, green, blue, brightness, mask;
+
+  brightness = config->brightness;
+  mask = config->mask;
+
+  if(mask & MASK_R)
+    red = 0;
+  else
+    red = config->red;
+
+  if(mask & (MASK_G | MASK_A))
+    green = 0;
+  else
+    green = config->green;
+  
+  if(mask & (MASK_B | MASK_A))
+    blue = 0;
+  else
+    blue = config->blue;
+  
+  buffer->leds[ 0 + config_index].raw = {0xE0 + brightness, blue, green, red};
+  buffer->leds[11 - config_index].raw = {0xE0 + brightness, blue, green, red};
+  buffer->leds[12 + config_index].raw = {0xE0 + brightness, blue, green, red};
+  buffer->leds[23 - config_index].raw = {0xE0 + brightness, blue, green, red};
+}
+
+void checkConfig(CONFIG *config, CONFIG_STATE *configState)
+{
+  unsigned long t = millis();
+  if((t - configState->t_R >= config->tOn_R) && (config->tOff_R > 0))
+  {
+    config->mask |= MASK_R;
+  }
+  if((t - configState->t_R >= config->tOn_R + config->tOff_R) && (config->tOn_R > 0))
+  {
+    config->mask &= ~MASK_R;
+    configState->t_R = t
+  }
+  
+  if((t - configState->t_G >= config->tOn_G) && (config->tOff_G > 0))
+  {
+    config->mask |= MASK_G;
+  }
+  if((t - t_G >= config->tOn_G + config->tOff_G) && (config->tOn_G > 0))
+  {
+    config->mask &= ~MASK_G;
+    configState->t_G = t
+  }
+  
+  if((t - configState->t_B >= config->tOn_B) && (config->tOff_B > 0))
+  {
+    config->mask |= MASK_B;
+  }
+  if((t - t_B >= config->tOn_B + config->tOff_B) && (config->tOn_B > 0))
+  {
+    config->mask &= ~MASK_B;
+    configState->t_B = t
+  }
+
+  if(t - configState->t_I >= config->tOn_I)
+  {
+    config->mask |= MASK_A;
+  }
+  if(t - t_I >= config->tOn_I + config->tOff_I)
+  {
+    config->mask &= ~MASK_A;
+    configState->t_I = t
+  }
+}
+
 void setup() {
     Serial.begin(9600);
     SPI.begin();
@@ -306,10 +447,32 @@ void setup() {
 
     if(loadOnBoot)
     {
-      config = flash.read();
+      configs = flash.read();
+    } else {
+      for(int n = 0; n < 6; n++)
+      {
+        configs[n] = {
+          .brightness = 31,
+          .red     = 0,
+          .green   = 0,
+          .blue    = 0,
+          .tOn_R   = 1,
+          .tOff_R  = 0,
+          .tOn_G   = 0,
+          .tOff_G  = 0,
+          .tOn_B   = 0,
+          .tOff_B  = 0,
+          .tOn_I   = 1,
+          .tOff_I  = 0
+        };
+      }
     }
-
-    t_R, t_G, t_B, t_I = millis();
+    t = millis();
+    for(int n = 0; n < 6; n++)
+    {
+      for(int m = 0; m < 4; m++)
+        configsState[n].t_X[m] = t;
+    }
 }
 
 void loop() {
@@ -319,52 +482,20 @@ void loop() {
   if(newData)
     parseData();
   
-  t = millis();
-  if((t - t_R >= config.tOn_R) && (config.tOff_R > 0))
+  for(int c = 0; c < 6; c++)
   {
-    mask |= MASK_R;
-  }
-  if((t - t_R >= config.tOn_R + config.tOff_R) && (config.tOn_R > 0))
-  {
-    mask &= ~MASK_R;
-    t_R = millis();
-  }
-  
-  if((t - t_G >= config.tOn_G) && (config.tOff_G > 0))
-  {
-    mask |= MASK_G;
-  }
-  if((t - t_G >= config.tOn_G + config.tOff_G) && (config.tOn_G > 0))
-  {
-    mask &= ~MASK_G;
-    t_G = millis();
-  }
-  
-  if((t - t_B >= config.tOn_B) && (config.tOff_B > 0))
-  {
-    mask |= MASK_B;
-  }
-  if((t - t_B >= config.tOn_B + config.tOff_B) && (config.tOn_B > 0))
-  {
-    mask &= ~MASK_B;
-    t_B = millis();
-  }
-
-  if(t - t_I >= config.tOn_I)
-  {
-    mask |= MASK_A;
-  }
-  if(t - t_I >= config.tOn_I + config.tOff_I)
-  {
-    mask &= ~MASK_A;
-    t_I = millis();
+   checkConfig(&configs[c], &configsState[c]);
   }
   
   frameDone = (mask == mask_old) ? true : false;
   mask_old = mask;
   //if(!frameDone)
   //{
-    writeFrame(&frameBuffer[buffer_free], &config, mask);
+    //writeFrame(&frameBuffer[buffer_free], &config, mask);
+    for(int c = 0; c < 6; c++)
+    {
+   writeCol(&frameBuffer[buffer_free], &configs[c], c);
+    }
     frameDone = true;
   //}
 
