@@ -86,23 +86,6 @@ typedef struct {
 CONFIG configs[6];
 CONFIG_STATE configsState[6];
 
-/*
-CONFIG config = {
-  .brightness = 31,
-  .red     = 0,
-  .green   = 0,
-  .blue    = 0,
-  .tOn_R   = 1,
-  .tOff_R  = 0,
-  .tOn_G   = 0,
-  .tOff_G  = 0,
-  .tOn_B   = 0,
-  .tOff_B  = 0,
-  .tOn_I   = 1,
-  .tOff_I  = 0
-};
-*/
-
 const byte numChars = 32;
 char receivedChars[numChars];
 char tmpChars[numChars];
@@ -122,8 +105,6 @@ volatile bool dmaDone = false;
 bool frameDone = false;
 #define DMA_LENGTH 4 + (N_LEDS * 4) + (N_LEDS / 16)
 
-unsigned long t, t_R, t_G, t_B, t_I;
-
 // EEPROM emulation for Atmel ARM based controllers
 FlashStorage(flash, CONFIG_STORE);
 
@@ -137,32 +118,29 @@ void config_setDuration(uint16_t tOn, uint16_t tOff, uint8_t mask)
   {
     if(configMask & (1 << n)) // true if config n is settable
     {
-      switch(mask)
+      if(mask & MASK_G)
       {
-
-        case MASK_G:
           configs[n].tOn_G = tOn;
           configs[n].tOff_G = tOff;
-        break;
-        
-        case MASK_R:
+      }
+      else if(mask & MASK_R)
+        {
           configs[n].tOn_R = tOn;
           configs[n].tOff_R = tOff;
-        break;
-
-        case MASK_B:
+        }
+      else if(mask & MASK_B)
+      {
           configs[n].tOn_B = tOn;
           configs[n].tOff_B = tOff;
-        break;
-
-        case MASK_A:
+      }
+      else if(mask & MASK_A)
+      {
           configs[n].tOn_R = tOn;
           configs[n].tOff_R = tOff;
           configs[n].tOn_G = tOn;
           configs[n].tOff_G = tOff;
           configs[n].tOn_B = tOn;
           configs[n].tOff_B = tOff;
-        break;
       }
     }
   }
@@ -198,6 +176,22 @@ void config_setColor(uint8_t red, uint8_t green, uint8_t blue)
       configs[n].red = red;
       configs[n].green = green;
       configs[n].blue = blue;
+    }
+  }
+}
+
+void config_resetTime(boolean interval)
+{
+  uint16_t t = millis();
+  for(int n = 0; n < 6; n++)
+  {
+    if(configMask & (1 << n))
+    {
+      configsState[n].t_B = t;
+      configsState[n].t_G = t;
+      configsState[n].t_R = t;
+      if(interval)
+        configsState[n].t_I = t;
     }
   }
 }
@@ -270,6 +264,38 @@ void parseData() {
     strtokIndx = strtok(NULL, ",:;");
     tOff = (uint16_t) atoi(strtokIndx) * 1000;
     config_setInterval(tOn, tOff);
+    config_resetTime(true);
+  }
+  else if(strtokIndx[0] == 'z') {
+    // zone selection
+    Serial.println("Got zoned-out data!");
+    strtokIndx = strtok(NULL, ",:;");
+    Serial.println(strtokIndx);
+
+    int c = 0;
+    configMask = 0;
+    while(strtokIndx[c] != '\0') {
+      char tmp = (char) strtokIndx[c];
+
+      if(tmp == '1')
+        configMask |= C_MASK_0;
+      else if(tmp == '2')
+        configMask |= C_MASK_1;
+      else if(tmp == '3')
+        configMask |= C_MASK_2;
+      else if(tmp == '4')
+        configMask |= C_MASK_3;
+      else if(tmp == '5')
+        configMask |= C_MASK_4;
+      else if(tmp == '6')
+        configMask |= C_MASK_5;
+      else if(tmp == '*')
+        configMask = 0x3F;
+
+      c++;
+    }
+    Serial.print("New zone mask: ");
+    Serial.println(configMask);
   }
   else if(strtokIndx[0] == 'd') {
     if(strtokIndx[1] == 'r') {
@@ -313,6 +339,8 @@ void parseData() {
       tOff = (uint16_t) atoi(strtokIndx);
       config_setDuration(tOn, tOff, MASK_A);
     }
+    // resync timing - not necessary but prettier
+    config_resetTime(false);
   }
   else if (strtokIndx[0] == 's')
   {
@@ -330,13 +358,14 @@ void parseData() {
   }
   else if(strtokIndx[0] == 'h') {
     Serial.print(R"(Accepted Formats:
-	brightness: b:xx - 0 to 31
-	color: c:xxx:xxx:xxx - 0 to 255
-	duration: d:xx:xx - tOn, tOff in ms
-	color duration dr, dg, db:xx:xx -tOn, tOff in ms
-	interval: i:xx:xx - tOn, tOff in sec
-	save config to EEPROM: s
-	load config from EEPROM: l
+	brightness: b:xx - 0 to 31, ex: b:2
+	color: c:xxx:xxx:xxx - 0 to 255, ex: c:255:0:50
+	duration: d:xx:xx - tOn, tOff in ms, ex: d:100:100
+	color duration dr, dg, db:xx:xx -tOn, tOff in ms, ex: dr:1:0 (const. red)
+	interval: i:xx:xx - tOn, tOff in sec, ex: i:15:15
+	save config to Flash: s
+	load config from Flash: l
+  select zones (columns): z:xxx - columns 1-6 or * for all, ex: z:024, z:*
 	help: h
 )");
   }
@@ -455,7 +484,7 @@ void checkConfig(CONFIG *config, CONFIG_STATE *configState)
   {
     configState->mask |= MASK_G;
   }
-  if((t - t_G >= config->tOn_G + config->tOff_G) && (config->tOn_G > 0))
+  if((t - configState->t_G >= config->tOn_G + config->tOff_G) && (config->tOn_G > 0))
   {
     configState->mask &= ~MASK_G;
     configState->t_G = t;
@@ -465,7 +494,7 @@ void checkConfig(CONFIG *config, CONFIG_STATE *configState)
   {
     configState->mask |= MASK_B;
   }
-  if((t - t_B >= config->tOn_B + config->tOff_B) && (config->tOn_B > 0))
+  if((t - configState->t_B >= config->tOn_B + config->tOff_B) && (config->tOn_B > 0))
   {
     configState->mask &= ~MASK_B;
     configState->t_B = t;
@@ -475,7 +504,7 @@ void checkConfig(CONFIG *config, CONFIG_STATE *configState)
   {
     configState->mask |= MASK_A;
   }
-  if(t - t_I >= config->tOn_I + config->tOff_I)
+  if(t - configState->t_I >= config->tOn_I + config->tOff_I)
   {
     configState->mask &= ~MASK_A;
     configState->t_I = t;
@@ -516,34 +545,52 @@ void setup() {
       for(int i = 0; i < 6; i++)
         configs[i] = tmp_configs.configs[i];
     } else {
-      for(int n = 0; n < 6; n++)
+      for(int n = 0; n < 3; n++)
       {
         configs[n] = {
-          .brightness = 31,
-          .red     = 0,
-          .green   = 0,
-          .blue    = 0,
+          .brightness = 1,
+          .red     = 20,
+          .green   = 10,
+          .blue    = 10,
           .tOn_R   = 1,
           .tOff_R  = 0,
-          .tOn_G   = 0,
-          .tOff_G  = 0,
-          .tOn_B   = 0,
-          .tOff_B  = 0,
+          .tOn_G   = 100,
+          .tOff_G  = 100,
+          .tOn_B   = 50,
+          .tOff_B  = 150,
           .tOn_I   = 1,
           .tOff_I  = 0
         };
       }
+      for(int n = 3; n < 6; n++)
+      {
+        configs[n] = {
+          .brightness = 1,
+          .red     = 5,
+          .green   = 10,
+          .blue    = 10,
+          .tOn_R   = 100,
+          .tOff_R  = 100,
+          .tOn_G   = 1,
+          .tOff_G  = 0,
+          .tOn_B   = 50,
+          .tOff_B  = 150,
+          .tOn_I   = 1,
+          .tOff_I  = 1
+        };
+      }
     }
-    t = millis();
+    
+    uint16_t t = millis();
     for(int n = 0; n < 6; n++)
     {
       for(int m = 0; m < 4; m++)
         configsState[n].t_X[m] = t;
     }
+    
 }
 
 void loop() {
-  uint8_t mask, mask_old;
   
   recvData();
   if(newData)
@@ -554,8 +601,6 @@ void loop() {
    checkConfig(&configs[c], &configsState[c]);
   }
   
-  frameDone = (mask == mask_old) ? true : false;
-  mask_old = mask;
   //if(!frameDone)
   //{
     //writeFrame(&frameBuffer[buffer_free], &config, mask);
@@ -578,6 +623,6 @@ void loop() {
     // swap buffers
     buffer_free = 1 - buffer_free;
   }
-  digitalWrite(LED_BUILTIN, buffer_free);
+  //digitalWrite(LED_BUILTIN, buffer_free);
   
 }
