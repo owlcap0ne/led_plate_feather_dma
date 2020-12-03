@@ -3,12 +3,13 @@
 #include "utility/dma.h"
 #include <FlashStorage.h>
 
-#define MASK_R 0x1  //red
-#define MASK_G 0x2  //green
-#define MASK_B 0x4  //blue
-#define MASK_A 0x8  //all
+#define MASK_R (1 << 0)  //red
+#define MASK_G (1 << 1)  //green
+#define MASK_B (1 << 2)  //blue
+#define MASK_A (1 << 3)  //all
 
 #define N_LEDS 24
+#define N_CONFIGS 6
 
 #define C_MASK_0  (1 << 0)
 #define C_MASK_1  (1 << 1)
@@ -17,7 +18,9 @@
 #define C_MASK_4  (1 << 4)
 #define C_MASK_5  (1 << 5)
 
-#define SPI_SPEED 8000000
+#define SPI_SPEED 14000000
+
+boolean loadOnBoot = true;
 
 typedef struct {
   union {
@@ -80,17 +83,16 @@ typedef struct {
 
 // ugly hack for flash storage...
 typedef struct {
-  CONFIG configs[6];
+  CONFIG configs[N_CONFIGS];
 } CONFIG_STORE;
 
-CONFIG configs[6];
-CONFIG_STATE configsState[6];
+CONFIG configs[N_CONFIGS];
+CONFIG_STATE configsState[N_CONFIGS];
 
 const byte numChars = 32;
 char receivedChars[numChars];
 char tmpChars[numChars];
 boolean newData = false;
-boolean loadOnBoot = false;
 
 // bitwise mask to select configs for setters
 int configMask = C_MASK_0 | C_MASK_1 | C_MASK_2 | C_MASK_3 | C_MASK_4 | C_MASK_5; // default: select all
@@ -114,7 +116,7 @@ void dma_callback(Adafruit_ZeroDMA *dma) {
 
 void config_setDuration(uint16_t tOn, uint16_t tOff, uint8_t mask)
 {
-  for(int n = 0; n < 6; n++)
+  for(int n = 0; n < N_CONFIGS; n++)
   {
     if(configMask & (1 << n)) // true if config n is settable
     {
@@ -148,7 +150,7 @@ void config_setDuration(uint16_t tOn, uint16_t tOff, uint8_t mask)
 
 void config_setBrightness(uint8_t brightness)
 {
-  for(int n = 0; n < 6; n++)
+  for(int n = 0; n < N_CONFIGS; n++)
   {
     if(configMask & (1 << n)) // true if config n is settable
       configs[n].brightness = brightness;
@@ -157,7 +159,7 @@ void config_setBrightness(uint8_t brightness)
 
 void config_setInterval(uint16_t tOn, uint16_t tOff)
 {
-  for(int n = 0; n < 6; n++)
+  for(int n = 0; n < N_CONFIGS; n++)
   {
     if(configMask & (1 << n)) // true if config n is settable
     {
@@ -169,7 +171,7 @@ void config_setInterval(uint16_t tOn, uint16_t tOff)
 
 void config_setColor(uint8_t red, uint8_t green, uint8_t blue)
 {
-  for(int n = 0; n < 6; n++)
+  for(int n = 0; n < N_CONFIGS; n++)
   {
     if(configMask & (1 << n))
     {
@@ -183,7 +185,7 @@ void config_setColor(uint8_t red, uint8_t green, uint8_t blue)
 void config_resetTime(boolean interval)
 {
   uint16_t t = millis();
-  for(int n = 0; n < 6; n++)
+  for(int n = 0; n < N_CONFIGS; n++)
   {
     if(configMask & (1 << n))
     {
@@ -344,16 +346,16 @@ void parseData() {
   }
   else if (strtokIndx[0] == 's')
   {
-    Serial.println("Saved current configuration to EEPROM!");
-    for(int i = 0; i < 6; i++)
+    Serial.println("Saved current configuration to Flash!");
+    for(int i = 0; i < N_CONFIGS; i++)
       tmp.configs[i] = configs[i];
     flash.write(tmp);
   }
   else if (strtokIndx[0] == 'l')
   {
-    Serial.println("Loaded previous configuration from EEPROM!");
+    Serial.println("Loaded previous configuration from Flash!");
     tmp = flash.read();
-    for(int i = 0; i < 6; i++)
+    for(int i = 0; i < N_CONFIGS; i++)
       configs[i] = tmp.configs[i];
   }
   else if(strtokIndx[0] == 'h') {
@@ -529,9 +531,10 @@ void setup() {
     );
     dma.setCallback(dma_callback);
 
+    // zero everything
     initFrame(&frameBuffer[0]);
     initFrame(&frameBuffer[1]);
-    frameDone = true;
+    //frameDone = true;
     pinMode(LED_BUILTIN, OUTPUT);
 
     // send zero'ed buffer once to quickly shut off all LEDS
@@ -539,78 +542,60 @@ void setup() {
     dmaStat = dma.startJob(); // go!
     while(!dmaDone);  // just wait
 
+    // load the last config from NVM
+    // !!! CONTAINS TRASH AFTER PROGRAMMING THE CONTROLLER - KEEP AWAY FROM CELLS UNTIL CONFIGURED PROPERLY !!!
     if(loadOnBoot)
     {
       CONFIG_STORE tmp_configs = flash.read();
-      for(int i = 0; i < 6; i++)
+      for(int i = 0; i < N_CONFIGS; i++)
         configs[i] = tmp_configs.configs[i];
     } else {
-      for(int n = 0; n < 3; n++)
+      for(int n = 0; n < N_CONFIGS; n++)
       {
         configs[n] = {
-          .brightness = 1,
-          .red     = 20,
-          .green   = 10,
-          .blue    = 10,
+          .brightness = 31,
+          .red     = 0,
+          .green   = 0,
+          .blue    = 0,
           .tOn_R   = 1,
           .tOff_R  = 0,
-          .tOn_G   = 100,
-          .tOff_G  = 100,
-          .tOn_B   = 50,
-          .tOff_B  = 150,
+          .tOn_G   = 0,
+          .tOff_G  = 0,
+          .tOn_B   = 0,
+          .tOff_B  = 0,
           .tOn_I   = 1,
           .tOff_I  = 0
         };
       }
-      for(int n = 3; n < 6; n++)
-      {
-        configs[n] = {
-          .brightness = 1,
-          .red     = 5,
-          .green   = 10,
-          .blue    = 10,
-          .tOn_R   = 100,
-          .tOff_R  = 100,
-          .tOn_G   = 1,
-          .tOff_G  = 0,
-          .tOn_B   = 50,
-          .tOff_B  = 150,
-          .tOn_I   = 1,
-          .tOff_I  = 1
-        };
-      }
     }
     
-    uint16_t t = millis();
-    for(int n = 0; n < 6; n++)
-    {
-      for(int m = 0; m < 4; m++)
-        configsState[n].t_X[m] = t;
-    }
+    // reset all timings including interval
+    config_resetTime(true);
     
 }
 
 void loop() {
   
+  // get new data from Serial and process it
   recvData();
   if(newData)
     parseData();
   
-  for(int c = 0; c < 6; c++)
+  // check the timings
+  for(int c = 0; c < N_CONFIGS; c++)
   {
    checkConfig(&configs[c], &configsState[c]);
   }
   
-  //if(!frameDone)
-  //{
-    //writeFrame(&frameBuffer[buffer_free], &config, mask);
-    for(int c = 0; c < 6; c++)
-    {
+  // write the frame buffer (without checking if that's necessary at the moment)
+  // TODO: only write on changes?
+  for(int c = 0; c < N_CONFIGS; c++)
+  {
    writeCol(&frameBuffer[buffer_free], &configs[c], &configsState[c], c);
-    }
-    frameDone = true;
-  //}
+  }
+  //frameDone = true;
 
+  // as soon as the DMA engine is ready transmit the next buffer
   if(dmaDone){
     SPI.endTransaction();
     dma.changeDescriptor(
@@ -623,6 +608,7 @@ void loop() {
     // swap buffers
     buffer_free = 1 - buffer_free;
   }
+
   //digitalWrite(LED_BUILTIN, buffer_free);
   
 }
