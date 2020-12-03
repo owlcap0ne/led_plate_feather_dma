@@ -78,41 +78,10 @@ typedef struct {
             tOff_I;
 } CONFIG;
 
-void config_setDuration(uint16_t tOn, uint16_t tOff, enum color{red = 0, green, blue, all})
-{
-  for(int n = 0; n < 6; n++)
-  {
-    if(configMask & (1 << n)) // true if config n is settable
-    {
-      switch(color)
-      {
-        case red:
-          configs[n].tOn_R = tOn;
-          configs[n].tOff_R = tOff;
-        break;
-
-        case green:
-          configs[n].tOn_G = tOn;
-          configs[n].tOff_G = tOff;
-        break;
-
-        case blue:
-          configs[n].tOn_B = tOn;
-          configs[n].tOff_B = tOff;
-        break;
-
-        case all:
-          configs[n].tOn_R = tOn;
-          configs[n].tOff_R = tOff;
-          configs[n].tOn_G = tOn;
-          configs[n].tOff_G = tOff;
-          configs[n].tOn_B = tOn;
-          configs[n].tOff_B = tOff;
-        break;
-      }
-    }
-  }
-}
+// ugly hack for flash storage...
+typedef struct {
+  CONFIG configs[6];
+} CONFIG_STORE;
 
 CONFIG configs[6];
 CONFIG_STATE configsState[6];
@@ -138,7 +107,7 @@ const byte numChars = 32;
 char receivedChars[numChars];
 char tmpChars[numChars];
 boolean newData = false;
-boolean loadOnBoot = true;
+boolean loadOnBoot = false;
 
 // bitwise mask to select configs for setters
 int configMask = C_MASK_0 | C_MASK_1 | C_MASK_2 | C_MASK_3 | C_MASK_4 | C_MASK_5; // default: select all
@@ -156,10 +125,81 @@ bool frameDone = false;
 unsigned long t, t_R, t_G, t_B, t_I;
 
 // EEPROM emulation for Atmel ARM based controllers
-FlashStorage(flash, CONFIG);
+FlashStorage(flash, CONFIG_STORE);
 
 void dma_callback(Adafruit_ZeroDMA *dma) {
   dmaDone = true;
+}
+
+void config_setDuration(uint16_t tOn, uint16_t tOff, uint8_t mask)
+{
+  for(int n = 0; n < 6; n++)
+  {
+    if(configMask & (1 << n)) // true if config n is settable
+    {
+      switch(mask)
+      {
+
+        case MASK_G:
+          configs[n].tOn_G = tOn;
+          configs[n].tOff_G = tOff;
+        break;
+        
+        case MASK_R:
+          configs[n].tOn_R = tOn;
+          configs[n].tOff_R = tOff;
+        break;
+
+        case MASK_B:
+          configs[n].tOn_B = tOn;
+          configs[n].tOff_B = tOff;
+        break;
+
+        case MASK_A:
+          configs[n].tOn_R = tOn;
+          configs[n].tOff_R = tOff;
+          configs[n].tOn_G = tOn;
+          configs[n].tOff_G = tOff;
+          configs[n].tOn_B = tOn;
+          configs[n].tOff_B = tOff;
+        break;
+      }
+    }
+  }
+}
+
+void config_setBrightness(uint8_t brightness)
+{
+  for(int n = 0; n < 6; n++)
+  {
+    if(configMask & (1 << n)) // true if config n is settable
+      configs[n].brightness = brightness;
+  }
+}
+
+void config_setInterval(uint16_t tOn, uint16_t tOff)
+{
+  for(int n = 0; n < 6; n++)
+  {
+    if(configMask & (1 << n)) // true if config n is settable
+    {
+      configs[n].tOn_I = tOn;
+      configs[n].tOff_I = tOff;
+    }
+  }
+}
+
+void config_setColor(uint8_t red, uint8_t green, uint8_t blue)
+{
+  for(int n = 0; n < 6; n++)
+  {
+    if(configMask & (1 << n))
+    {
+      configs[n].red = red;
+      configs[n].green = green;
+      configs[n].blue = blue;
+    }
+  }
 }
 
 void recvData() {
@@ -188,40 +228,48 @@ void recvData() {
 
 void parseData() {
   char * strtokIndx;
+
+  uint16_t tOn, tOff;
+  uint8_t red, green, blue, brightness;
+  CONFIG_STORE tmp;
   
   strtokIndx = strtok(tmpChars, ",:;");
   if(strtokIndx[0] == 'b') {
     //brightness
     Serial.println("Got bright data!");
     strtokIndx = strtok(NULL, ",:;");
-    config.brightness = (uint8_t) atoi(strtokIndx);
-    if (config.brightness > 31)
-      config.brightness = 31;
-    Serial.println(config.brightness);
+    brightness = (uint8_t) atoi(strtokIndx);
+    if (brightness > 31)
+      brightness = 31;
+    config_setBrightness(brightness);
+    Serial.println(brightness);
   }
   else if(strtokIndx[0] == 'c') {
     //color
     Serial.println("Got colorful data!");
     strtokIndx = strtok(NULL, ",:;");
     Serial.println(strtokIndx);
-    config.red = (uint8_t) atoi(strtokIndx);
+    red = (uint8_t) atoi(strtokIndx);
     strtokIndx = strtok(NULL, ",:;");
 
     Serial.println(strtokIndx);
-    config.green = (uint8_t) atoi(strtokIndx);
+    green = (uint8_t) atoi(strtokIndx);
     strtokIndx = strtok(NULL, ",:;");
 
     Serial.println(strtokIndx);
-    config.blue = (uint8_t) atoi(strtokIndx);
+    blue = (uint8_t) atoi(strtokIndx);
+
+    config_setColor(red, green, blue);
   }
   else if(strtokIndx[0] == 'i') {
     //interval
     Serial.println("Got intermittent data!");
     strtokIndx = strtok(NULL, ",:;");
     Serial.println(strtokIndx);
-    config.tOn_I = (uint16_t) atoi(strtokIndx) * 1000;
+    tOn = (uint16_t) atoi(strtokIndx) * 1000;
     strtokIndx = strtok(NULL, ",:;");
-    config.tOff_I = (uint16_t) atoi(strtokIndx) * 1000;
+    tOff = (uint16_t) atoi(strtokIndx) * 1000;
+    config_setInterval(tOn, tOff);
   }
   else if(strtokIndx[0] == 'd') {
     if(strtokIndx[1] == 'r') {
@@ -229,54 +277,56 @@ void parseData() {
       Serial.println("Got enduring red data!");
       strtokIndx = strtok(NULL, ",:;");
       Serial.println(strtokIndx);
-      config.tOn_R = (uint16_t) atoi(strtokIndx);
+      tOn = (uint16_t) atoi(strtokIndx);
       strtokIndx = strtok(NULL, ",:;");
       Serial.println(strtokIndx);
-      config.tOff_R = (uint16_t) atoi(strtokIndx);
+      tOff = (uint16_t) atoi(strtokIndx);
+      config_setDuration(tOn, tOff, MASK_R);
     }else if(strtokIndx[1] == 'g') {
       //green duration
       Serial.println("Got enduring green data!");
       strtokIndx = strtok(NULL, ",:;");
       Serial.println(strtokIndx);
-      config.tOn_G = (uint16_t) atoi(strtokIndx);
+      tOn = (uint16_t) atoi(strtokIndx);
       strtokIndx = strtok(NULL, ",:;");
       Serial.println(strtokIndx);
-      config.tOff_G = (uint16_t) atoi(strtokIndx);
+      tOff = (uint16_t) atoi(strtokIndx);
+      config_setDuration(tOn, tOff, MASK_G);
     }else if(strtokIndx[1] == 'b') {
       //blue duration
       Serial.println("Got enduring blue data!");
       strtokIndx = strtok(NULL, ",:;");
       Serial.println(strtokIndx);
-      config.tOn_B = (uint16_t) atoi(strtokIndx);
+      tOn = (uint16_t) atoi(strtokIndx);
       strtokIndx = strtok(NULL, ",:;");
       Serial.println(strtokIndx);
-      config.tOff_B = (uint16_t) atoi(strtokIndx);
+      tOff = (uint16_t) atoi(strtokIndx);
+      config_setDuration(tOn, tOff, MASK_B);
     }else{
       //duration
       Serial.println("Got enduring data!");
       strtokIndx = strtok(NULL, ",:;");
       Serial.println(strtokIndx);
-      uint16_t duration = (uint16_t) atoi(strtokIndx);
-      config.tOn_R = duration;
-      config.tOn_G = duration;
-      config.tOn_B = duration;
+      tOn = (uint16_t) atoi(strtokIndx);
       strtokIndx = strtok(NULL, ",:;");
       Serial.println(strtokIndx);
-      duration = (uint16_t) atoi(strtokIndx);
-      config.tOff_R = duration;
-      config.tOff_G = duration;
-      config.tOff_B = duration;
+      tOff = (uint16_t) atoi(strtokIndx);
+      config_setDuration(tOn, tOff, MASK_A);
     }
   }
   else if (strtokIndx[0] == 's')
   {
-  Serial.println("Saved current configuration to EEPROM!");
-    flash.write(configs);
+    Serial.println("Saved current configuration to EEPROM!");
+    for(int i = 0; i < 6; i++)
+      tmp.configs[i] = configs[i];
+    flash.write(tmp);
   }
   else if (strtokIndx[0] == 'l')
   {
-  Serial.println("Loaded previous configuration from EEPROM!");
-    configs = flash.read();
+    Serial.println("Loaded previous configuration from EEPROM!");
+    tmp = flash.read();
+    for(int i = 0; i < 6; i++)
+      configs[i] = tmp.configs[i];
   }
   else if(strtokIndx[0] == 'h') {
     Serial.print(R"(Accepted Formats:
@@ -341,7 +391,7 @@ void writeFrame(LED_BUFFER *buffer, CONFIG *config, uint8_t mask) {
   }
 }
 
-void writeCol(LED_BUFFER *buffer, CONFIG *config, uint8_t config_index)
+void writeCol(LED_BUFFER *buffer, CONFIG *config, CONFIG_STATE *configState, uint8_t config_index)
 {
   // clamping to avoid memory corruption
   if(config_index > 5)
@@ -350,7 +400,7 @@ void writeCol(LED_BUFFER *buffer, CONFIG *config, uint8_t config_index)
   uint8_t red, green, blue, brightness, mask;
 
   brightness = config->brightness;
-  mask = config->mask;
+  mask = configState->mask;
 
   if(mask & MASK_R)
     red = 0;
@@ -367,10 +417,25 @@ void writeCol(LED_BUFFER *buffer, CONFIG *config, uint8_t config_index)
   else
     blue = config->blue;
   
-  buffer->leds[ 0 + config_index].raw = {0xE0 + brightness, blue, green, red};
-  buffer->leds[11 - config_index].raw = {0xE0 + brightness, blue, green, red};
-  buffer->leds[12 + config_index].raw = {0xE0 + brightness, blue, green, red};
-  buffer->leds[23 - config_index].raw = {0xE0 + brightness, blue, green, red};
+  buffer->leds[ 0 + config_index].intensity = 0xE0 + brightness;
+  buffer->leds[ 0 + config_index].red = red;
+  buffer->leds[ 0 + config_index].green = green;
+  buffer->leds[ 0 + config_index].blue = blue;
+
+  buffer->leds[11 - config_index].intensity = 0xE0 + brightness;
+  buffer->leds[11 - config_index].red = red;
+  buffer->leds[11 - config_index].green = green;
+  buffer->leds[11 - config_index].blue = blue;
+
+  buffer->leds[12 + config_index].intensity = 0xE0 + brightness;
+  buffer->leds[12 + config_index].red = red;
+  buffer->leds[12 + config_index].green = green;
+  buffer->leds[12 + config_index].blue = blue;
+
+  buffer->leds[23 - config_index].intensity = 0xE0 + brightness;
+  buffer->leds[23 - config_index].red = red;
+  buffer->leds[23 - config_index].green = green;
+  buffer->leds[23 - config_index].blue = blue;
 }
 
 void checkConfig(CONFIG *config, CONFIG_STATE *configState)
@@ -378,42 +443,42 @@ void checkConfig(CONFIG *config, CONFIG_STATE *configState)
   unsigned long t = millis();
   if((t - configState->t_R >= config->tOn_R) && (config->tOff_R > 0))
   {
-    config->mask |= MASK_R;
+    configState->mask |= MASK_R;
   }
   if((t - configState->t_R >= config->tOn_R + config->tOff_R) && (config->tOn_R > 0))
   {
-    config->mask &= ~MASK_R;
-    configState->t_R = t
+    configState->mask &= ~MASK_R;
+    configState->t_R = t;
   }
   
   if((t - configState->t_G >= config->tOn_G) && (config->tOff_G > 0))
   {
-    config->mask |= MASK_G;
+    configState->mask |= MASK_G;
   }
   if((t - t_G >= config->tOn_G + config->tOff_G) && (config->tOn_G > 0))
   {
-    config->mask &= ~MASK_G;
-    configState->t_G = t
+    configState->mask &= ~MASK_G;
+    configState->t_G = t;
   }
   
   if((t - configState->t_B >= config->tOn_B) && (config->tOff_B > 0))
   {
-    config->mask |= MASK_B;
+    configState->mask |= MASK_B;
   }
   if((t - t_B >= config->tOn_B + config->tOff_B) && (config->tOn_B > 0))
   {
-    config->mask &= ~MASK_B;
-    configState->t_B = t
+    configState->mask &= ~MASK_B;
+    configState->t_B = t;
   }
 
   if(t - configState->t_I >= config->tOn_I)
   {
-    config->mask |= MASK_A;
+    configState->mask |= MASK_A;
   }
   if(t - t_I >= config->tOn_I + config->tOff_I)
   {
-    config->mask &= ~MASK_A;
-    configState->t_I = t
+    configState->mask &= ~MASK_A;
+    configState->t_I = t;
   }
 }
 
@@ -447,7 +512,9 @@ void setup() {
 
     if(loadOnBoot)
     {
-      configs = flash.read();
+      CONFIG_STORE tmp_configs = flash.read();
+      for(int i = 0; i < 6; i++)
+        configs[i] = tmp_configs.configs[i];
     } else {
       for(int n = 0; n < 6; n++)
       {
@@ -494,7 +561,7 @@ void loop() {
     //writeFrame(&frameBuffer[buffer_free], &config, mask);
     for(int c = 0; c < 6; c++)
     {
-   writeCol(&frameBuffer[buffer_free], &configs[c], c);
+   writeCol(&frameBuffer[buffer_free], &configs[c], &configsState[c], c);
     }
     frameDone = true;
   //}
