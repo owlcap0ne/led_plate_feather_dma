@@ -19,6 +19,10 @@ typedef struct {
   union {
     struct {
       union {
+        uint8_t i;
+        uint8_t intensity;
+      };
+      union {
         uint8_t r;
         uint8_t red;
       };
@@ -31,7 +35,7 @@ typedef struct {
         uint8_t blue;
       };
     };
-    uint8_t raw[3];
+    uint8_t raw[4];
   };
 } LED;
 
@@ -84,14 +88,14 @@ void updateLEDs(LED *ledarray, CONFIG *config)
 {
   for(int i = 0; i < N_LEDS; i++)
   {
+    ledarray[i].intensity = 0xE0 + config->brightness;
     ledarray[i].red = config->red;
     ledarray[i].green = config->green;
     ledarray[i].blue = config->blue;
   }
 }
 
-void APA102(LED *ledarray, uint8_t leds, uint8_t brightness, uint8_t mask) {
-  uint8_t *_ledarray = (uint8_t*) ledarray;
+void writeLEDs(LED *ledarray, uint8_t leds, uint8_t mask) {
   
   SPI.beginTransaction(SPISettings(SPI_FREQ, MSBFIRST, SPI_MODE0));
   
@@ -101,23 +105,27 @@ void APA102(LED *ledarray, uint8_t leds, uint8_t brightness, uint8_t mask) {
   SPI.transfer(0x00);
   SPI.transfer(0x00);
   
-  for (int i = 0; i < (leds+leds+leds); i += 3) {
-    SPI.transfer(0xE0 + brightness);
+  for (int i = 0; i < leds; i++) {
+    // brightness
+    SPI.transfer(ledarray[i].intensity);
     
+    // blue
     if((mask & MASK_B) || (mask & MASK_A))
       SPI.transfer(0);
     else
-      SPI.transfer(_ledarray[i +2]);
+      SPI.transfer(ledarray[i].blue);
     
+    // green
     if((mask & MASK_G) || (mask & MASK_A))
       SPI.transfer(0);
     else
-      SPI.transfer(_ledarray[i +1]);
+      SPI.transfer(ledarray[i].green);
       
+    // red
     if((mask & MASK_R) /*|| (mask & MASK_A)*/)  //TODO: Make the interval mask more universal
       SPI.transfer(0);
     else
-      SPI.transfer(_ledarray[i +0]);
+      SPI.transfer(ledarray[i].red);
   }
   
   //End frame
@@ -167,6 +175,8 @@ void parseData(LED *ledarray, CONFIG *config) {
       brightness = 31;
     config->brightness = brightness;
     Serial.println(brightness);
+
+    updateLEDs(ledarray, config);
   }
   else if(strtokIndx[0] == 'c') {
     //color
@@ -241,18 +251,18 @@ void parseData(LED *ledarray, CONFIG *config) {
   {
   Serial.println("Saved current configuration to EEPROM!");
   #ifdef __SAMD51__
-    flash.write(config);
+    flash.write(*config);
   #else
-    EEPROM.put(0, config);
+    EEPROM.put(0, *config);
   #endif
   }
   else if (strtokIndx[0] == 'l')
   {
   Serial.println("Loaded previous configuration from EEPROM!");
   #ifdef __SAMD51__
-    config = flash.read();
+    *config = flash.read();
   #else
-    EEPROM.get(0, config);
+    EEPROM.get(0, *config);
   #endif
 
   updateLEDs(ledarray, config);
@@ -275,7 +285,7 @@ void parseData(LED *ledarray, CONFIG *config) {
 void setup() {
     Serial.begin(9600);
     SPI.begin();
-    APA102(led, 24, config.brightness, 15); // zero everything
+    writeLEDs(led, 24, 15); // zero everything
 
     if(loadOnBoot)
     {
@@ -344,6 +354,6 @@ void loop() {
     t_I = millis();
   }
   
-  APA102(led, 24, config.brightness, mask);
+  writeLEDs(led, 24, mask);
   
 }
