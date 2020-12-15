@@ -18,7 +18,10 @@
 #define C_MASK_4  (1 << 4)
 #define C_MASK_5  (1 << 5)
 
-#define SPI_SPEED 14000000
+#define SPI_SPEED 8000000
+
+#define F_UPDATE 2000 // update frequency for LED array, min. 1000 for 1ms resolution
+#define T_UPDATE 1000000 / F_UPDATE // interval between updates in us
 
 boolean loadOnBoot = true;
 
@@ -574,7 +577,11 @@ void setup() {
     
 }
 
+unsigned long t_current = 0,
+              t_previous;
+
 void loop() {
+  t_current = micros();
   
   // get new data from Serial and process it
   recvData();
@@ -596,7 +603,11 @@ void loop() {
   //frameDone = true;
 
   // as soon as the DMA engine is ready transmit the next buffer
-  if(dmaDone){
+  if(dmaDone && (t_current - t_previous >= T_UPDATE)){
+    t_previous = t_current;
+
+    //digitalWrite(LED_BUILTIN, 1);
+
     SPI.endTransaction();
     dma.changeDescriptor(
       dmaDesc,
@@ -607,6 +618,8 @@ void loop() {
     dmaDone = false;
     // swap buffers
     buffer_free = 1 - buffer_free;
+
+    //digitalWrite(LED_BUILTIN, 0);
   }
 
   //digitalWrite(LED_BUILTIN, buffer_free);
