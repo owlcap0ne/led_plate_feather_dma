@@ -11,7 +11,11 @@
 #define MASK_B (1 << 2)  //blue
 #define MASK_A (1 << 3)  //all
 
-#define SPI_FREQ 15000000
+#define SPI_FREQ 8000000  // SPI bit clock frequency - set lower if glitching occurs
+                          // don't go lower than ~4MHz on Arduino Nanos
+
+#define F_UPDATE 2000 // how often per sec the entire LED array is updated, min 1000 for 1ms resolution
+  #define T_UPDATE (1000000 / F_UPDATE)
 
 boolean loadOnBoot = true;
 
@@ -79,6 +83,7 @@ char tmpChars[numChars];
 boolean newData = false;
 
 unsigned long t, t_R, t_G, t_B, t_I;
+unsigned long t_update, t_updateLast;
 
 #ifdef __SAMD51__ // EEPROM emulation for Atmel ARM based controllers
   FlashStorage(flash, CONFIG);
@@ -308,6 +313,7 @@ void setup() {
 
 void loop() {
   uint8_t mask;
+  t_update = micros();
   
   recvData();
   if(newData)
@@ -354,6 +360,10 @@ void loop() {
     t_I = millis();
   }
   
-  writeLEDs(led, 24, mask);
+  if(t_update - t_updateLast > T_UPDATE)
+  {
+    t_updateLast = t_update;
+    writeLEDs(led, 24, mask);
+  }
   
 }
